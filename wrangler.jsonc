@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cfe2e-note",
+  "main": "src/worker/index.js",
+  "compatibility_date": "2026-11-19",
+  "workers_dev": true,
+  "preview_urls": false,
+  "keep_vars": true,
+  "observability": {
+    "enabled": false,
+    "logs": { "enabled": false, "invocation_logs": false },
+    "traces": { "enabled": false },
+    "issues": { "enabled": false }
+  },
+  "logpush": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cfe2e-note",
+      // Deploy to Cloudflare replaces this on import; private imports use the D1 dashboard UUID.
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "LOGIN_LIMIT",
+      "namespace_id": "862769147",
+      "simple": { "limit": 8, "period": 60 }
+    }
+  ]
+}
+
