@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { createSalt, deriveKey, openVault, sealVault } from "../web/js/crypto.js";
 import { clientOrigin } from "../src/worker/http.js";
+import { vaultSchema } from "../src/worker/vault.js";
 import worker from "../src/worker/index.js";
 
 const sample = [{
@@ -59,16 +60,17 @@ test("vault encrypts every save with a fresh IV and authenticates the contents",
   }), sample);
 });
 
-test("the API stores only valid envelopes and rejects concurrent stale writes", async () => {
+test("the first authenticated session initializes a fresh database and stale writes are rejected", async () => {
   const database = new DatabaseSync(":memory:");
   try {
-    database.exec(migration);
+    assert.equal(vaultSchema, migration.trim());
     const env = {
       ...passwordEnv(),
       DB: {
         prepare(query) {
           const statement = database.prepare(query);
           return {
+            run: () => statement.run(),
             first: () => statement.get(),
             bind: (...params) => ({ first: () => statement.get(...params) }),
           };
@@ -79,7 +81,13 @@ test("the API stores only valid envelopes and rejects concurrent stale writes", 
     const key = await deriveKey(passphrase, salt);
     const blank = await sealVault(key, salt, []);
     const next = await sealVault(key, salt, sample);
-    const authenticated = await login(env, accessPassword);
+    const tableExists = () => !!database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'vault'").get();
+    assert.equal((await login(env, "wrong-access-password-only-used-in-tests")).status, 401);
+    assert.equal(tableExists(), false);
+    const [authenticated, concurrent] = await Promise.all([login(env, accessPassword), login(env, accessPassword)]);
+    assert.equal(authenticated.status, 200);
+    assert.equal(concurrent.status, 200);
+    assert.equal(tableExists(), true);
     const { token } = await authenticated.json();
     const authHeaders = { Origin: clientOrigin, Authorization: `Bearer ${token}` };
     const get = (headers = authHeaders) => worker.fetch(new Request(url, { headers }), env);
@@ -110,6 +118,8 @@ test("the API stores only valid envelopes and rejects concurrent stale writes", 
     assert.deepEqual(await response.json(), winner);
     database.exec(migration);
     assert.deepEqual(JSON.parse(database.prepare("SELECT envelope FROM vault").get().envelope), winner);
+    assert.equal((await login(env, accessPassword)).status, 200);
+    assert.deepEqual(JSON.parse(database.prepare("SELECT envelope FROM vault").get().envelope), winner);
   } finally {
     database.close();
   }
@@ -118,6 +128,7 @@ test("the API stores only valid envelopes and rejects concurrent stale writes", 
 test("worker serves only JSON and requires an expiring bearer session without cookies", async (t) => {
   const rateKeys = [];
   const env = passwordEnv();
+  env.DB = { prepare: () => ({ run() {} }) };
   env.LOGIN_LIMIT.limit = async ({ key }) => {
     rateKeys.push(key);
     return { success: true };
@@ -127,7 +138,9 @@ test("worker serves only JSON and requires an expiring bearer session without co
   }), { ...env, ...overrides });
 
   assert.equal((await request("/api/vault", undefined, { APP_PASSWORD: "" })).status, 503);
-  assert.equal((await request("/")).status, 404);
+  const root = await request("/");
+  assert.equal(root.status, 200);
+  assert.deepEqual(await root.json(), { service: "cfe2e-note", status: "online" });
   assert.equal((await request("/js/app.js")).status, 404);
   assert.equal((await request("/api/vault")).status, 401);
   assert.equal((await login(env, accessPassword, "https://other.example")).status, 403);

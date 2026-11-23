@@ -11,7 +11,7 @@
     "client": "node src/client/server.js",
     "db:local": "wrangler d1 migrations apply DB --local",
     "db:remote": "wrangler d1 migrations apply DB --remote",
-    "deploy": "node scripts/deploy.js",
+    "deploy": "wrangler deploy",
     "test": "node --test"
   },
   "cloudflare": {

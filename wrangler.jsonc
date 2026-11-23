@@ -17,8 +17,8 @@
     {
       "binding": "DB",
       "database_name": "cfe2e-note",
-      // Deploy to Cloudflare replaces this on import; private imports use the D1 dashboard UUID.
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      // Deploy to Cloudflare fills in the database ID for the target account.
+      "database_id": ""
     }
   ],
   "ratelimits": [

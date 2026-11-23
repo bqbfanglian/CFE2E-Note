@@ -1,6 +1,12 @@
 import { MAX_ENVELOPE_BYTES, validateEnvelope } from "../../web/js/vault-format.js";
 import { error, headers, readText } from "./http.js";
 
+export const vaultSchema = `CREATE TABLE IF NOT EXISTS vault (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  envelope TEXT NOT NULL
+);`;
+
 export async function handleVault(request, db) {
   if (request.method === "GET") {
     const row = await db.prepare("SELECT revision, envelope FROM vault WHERE id = 1").first();
