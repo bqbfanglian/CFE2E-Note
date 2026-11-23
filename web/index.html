@@ -21,16 +21,12 @@
     <section class="gate-card" aria-labelledby="gate-title">
       <div class="gate-mark" aria-hidden="true"><span class="lock-symbol"></span></div>
       <h1 id="gate-title">登录门禁</h1>
-      <p id="gate-copy">先连接你的同步 Worker，再用独立的主密码解锁。</p>
+      <p id="gate-copy">输入门禁密码后，再用独立的加密主密码解锁笔记。</p>
       <p id="gate-notice" class="notice" role="alert" hidden></p>
       <div id="access-fields">
-        <label for="worker-url">同步 Worker 网址</label>
-        <input id="worker-url" type="url" placeholder="https://你的 Worker 网址" autocomplete="off" autocapitalize="off">
-        <div class="confirm-field">
-          <label for="access-password">门禁密码</label>
-          <input id="access-password" type="password" maxlength="256" autocomplete="off">
-        </div>
-        <button id="connect" class="primary" type="button">连接</button>
+        <label for="access-password">门禁密码</label>
+        <input id="access-password" type="password" maxlength="256" autocomplete="off">
+        <button id="connect" class="primary" type="button">登录</button>
       </div>
       <div id="unlock-fields" hidden>
         <label for="password">加密主密码</label>

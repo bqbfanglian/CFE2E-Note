@@ -8,7 +8,6 @@
   },
   "scripts": {
     "dev": "wrangler dev --ip 127.0.0.1",
-    "client": "node src/client/server.js",
     "db:local": "wrangler d1 migrations apply DB --local",
     "db:remote": "wrangler d1 migrations apply DB --remote",
     "deploy": "wrangler deploy",
@@ -17,7 +16,7 @@
   "cloudflare": {
     "bindings": {
       "APP_PASSWORD": {
-        "description": "只填写门禁密码。请使用至少 32 个随机字符。加密主密码只在本地客户端输入。"
+        "description": "填写至少 32 个随机字符作为网页门禁密码。加密主密码在网页解锁时单独输入。"
       }
     }
   },

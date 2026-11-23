@@ -33,8 +33,8 @@ test("locking clears all fields and ignores work that finishes after lock", asyn
   const token = `v1.1700000000.${"A".repeat(22)}.${"A".repeat(43)}`;
   const sessionResponse = () => Response.json({ token });
   runInNewContext(source.replace(/^import .+\r?\n/gm, ""), {
-    document, window, location: { origin: "http://127.0.0.1:8765" }, isSecureContext: true,
-    crypto, MAX_ENVELOPE_BYTES, URL, TextDecoder, AbortSignal, AbortController,
+    document, window, isSecureContext: true,
+    crypto, MAX_ENVELOPE_BYTES, TextDecoder, AbortSignal, AbortController,
     setTimeout(callback, delay) {
       assert.equal(delay, 60_000);
       fireIdleTimer = callback;
@@ -45,8 +45,10 @@ test("locking clears all fields and ignores work that finishes after lock", asyn
     deriveKey: () => new Promise((resolve) => { finishDeriving = resolve; }),
     openVault() { decrypted = true; return []; },
     async fetch(url, options) {
+      assert.ok(url === "/api/session" || url === "/api/vault");
       assert.equal(options.credentials, "omit");
       assert.equal(options.cache, "no-store");
+      assert.equal(options.mode, "same-origin");
       assert.equal(options.redirect, "error");
       assert.ok(!options.body?.includes("private master password"));
       if (url.endsWith("/api/session") && !locked) {
@@ -58,24 +60,22 @@ test("locking clears all fields and ignores work that finishes after lock", asyn
     },
   });
 
-  function fillConnection() {
-    nodes.get("worker-url").value = "https://notes.example.com";
+  function fillGatePassword() {
     nodes.get("access-password").value = "test-only-access-password";
   }
   const click = (id) => nodes.get(id).listeners.get("click")();
 
-  fillConnection();
+  fillGatePassword();
   const staleRequest = click("connect");
   window.blur();
   assert.equal(observedSignal.aborted, true);
   completeRequest(sessionResponse());
   await staleRequest;
   assert.equal(nodes.get("unlock-fields").hidden, true);
-  assert.equal(nodes.get("worker-url").value, "");
   assert.equal(nodes.get("access-password").value, "");
 
   locked = true;
-  fillConnection();
+  fillGatePassword();
   await click("connect");
   assert.equal(nodes.get("unlock-fields").hidden, false);
   nodes.get("password").value = "private master password";
@@ -91,9 +91,8 @@ test("locking clears all fields and ignores work that finishes after lock", asyn
   assert.equal(nodes.get("note-body").value, "");
 
   document.hidden = false;
-  fillConnection();
+  fillGatePassword();
   document.input({ target: nodes.get("access-password") });
   fireIdleTimer();
-  assert.equal(nodes.get("worker-url").value, "");
   assert.equal(nodes.get("access-password").value, "");
 });

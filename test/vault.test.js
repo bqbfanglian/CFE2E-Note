@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { createSalt, deriveKey, openVault, sealVault } from "../web/js/crypto.js";
-import { clientOrigin } from "../src/worker/http.js";
 import { vaultSchema } from "../src/worker/vault.js";
 import worker from "../src/worker/index.js";
 
@@ -20,7 +19,7 @@ const origin = "https://notes.example.com";
 const url = `${origin}/api/vault`;
 const accessPassword = "test-only-random-style-password-123456";
 
-function login(env, password, requestOrigin = clientOrigin) {
+function login(env, password, requestOrigin = origin) {
   return worker.fetch(new Request(`${origin}/api/session`, {
     method: "POST",
     headers: { Origin: requestOrigin, "Content-Type": "application/json" },
@@ -89,15 +88,15 @@ test("the first authenticated session initializes a fresh database and stale wri
     assert.equal(concurrent.status, 200);
     assert.equal(tableExists(), true);
     const { token } = await authenticated.json();
-    const authHeaders = { Origin: clientOrigin, Authorization: `Bearer ${token}` };
+    const authHeaders = { Authorization: `Bearer ${token}` };
     const get = (headers = authHeaders) => worker.fetch(new Request(url, { headers }), env);
     const put = (body, headers = {}) => worker.fetch(new Request(url, {
       method: "PUT",
-      headers: { ...authHeaders, "Content-Type": "application/json", ...headers },
+      headers: { Origin: origin, ...authHeaders, "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
     }), env);
 
-    assert.equal((await get({ Origin: clientOrigin })).status, 401);
+    assert.equal((await get({})).status, 401);
     assert.equal((await get()).status, 404);
     assert.equal((await put(blank)).status, 428);
     assert.equal((await put(blank, { Origin: "https://other.example", "If-None-Match": "*" })).status, 403);
@@ -125,23 +124,32 @@ test("the first authenticated session initializes a fresh database and stale wri
   }
 });
 
-test("worker serves only JSON and requires an expiring bearer session without cookies", async (t) => {
+test("worker serves the login page and restricts the API to same-origin password sessions", async (t) => {
   const rateKeys = [];
   const env = passwordEnv();
   env.DB = { prepare: () => ({ run() {} }) };
+  env.ASSETS = {
+    fetch: async (request) => new URL(request.url).pathname === "/"
+      ? new Response(readFileSync(new URL("../web/index.html", import.meta.url)), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "max-age=3600" },
+      })
+      : new Response(null, { status: 404 }),
+  };
   env.LOGIN_LIMIT.limit = async ({ key }) => {
     rateKeys.push(key);
     return { success: true };
   };
   const request = (path, token, overrides = {}) => worker.fetch(new Request(`${origin}${path}`, {
-    headers: { Origin: clientOrigin, ...(token && { Authorization: `Bearer ${token}` }) },
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
   }), { ...env, ...overrides });
 
   assert.equal((await request("/api/vault", undefined, { APP_PASSWORD: "" })).status, 503);
   const root = await request("/");
   assert.equal(root.status, 200);
-  assert.deepEqual(await root.json(), { service: "cfe2e-note", status: "online" });
-  assert.equal((await request("/js/app.js")).status, 404);
+  assert.match(root.headers.get("Content-Type"), /^text\/html/);
+  assert.equal(root.headers.get("Cache-Control"), "no-store");
+  assert.match(root.headers.get("Content-Security-Policy"), /connect-src 'self'/);
+  assert.match(await root.text(), /登录门禁/);
   assert.equal((await request("/api/vault")).status, 401);
   assert.equal((await login(env, accessPassword, "https://other.example")).status, 403);
   assert.equal((await login(env, "test-only-wrong-password-value-123456")).status, 401);
@@ -149,11 +157,10 @@ test("worker serves only JSON and requires an expiring bearer session without co
   assert.equal((await login(limited, accessPassword)).status, 429);
 
   const preflight = await worker.fetch(new Request(url, {
-    method: "OPTIONS", headers: { Origin: clientOrigin },
+    method: "OPTIONS", headers: { Origin: "https://other.example" },
   }), env);
-  assert.equal(preflight.status, 204);
-  assert.equal(preflight.headers.get("Access-Control-Allow-Origin"), clientOrigin);
-  assert.match(preflight.headers.get("Access-Control-Allow-Headers"), /Authorization/);
+  assert.equal(preflight.status, 405);
+  assert.equal(preflight.headers.get("Access-Control-Allow-Origin"), null);
   assert.equal(preflight.headers.get("Access-Control-Allow-Credentials"), null);
 
   const signIn = await login(env, accessPassword);
@@ -166,17 +173,20 @@ test("worker serves only JSON and requires an expiring bearer session without co
     DB: { prepare: () => ({ first: () => null }) },
   });
   assert.equal(allowed.status, 404);
+  assert.equal((await worker.fetch(new Request(url, {
+    headers: { Origin: "https://other.example", Authorization: `Bearer ${token}` },
+  }), env)).status, 403);
 
   const fields = token.split(".");
   fields[3] = (fields[3][0] === "A" ? "B" : "A") + fields[3].slice(1);
   assert.equal((await request("/api/vault", fields.join("."))).status, 401);
   assert.equal((await request("/api/vault", token, { APP_PASSWORD: accessPassword + "-rotated" })).status, 401);
   assert.equal((await worker.fetch(new Request("https://other.example/api/vault", {
-    headers: { Origin: clientOrigin, Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}` },
   }), env)).status, 401);
 
   assert.equal((await worker.fetch(new Request(url, {
-    headers: { Origin: clientOrigin, Cookie: `session=${token}` },
+    headers: { Cookie: `session=${token}` },
   }), env)).status, 401);
 
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });

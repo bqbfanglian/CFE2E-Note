@@ -5,9 +5,7 @@ const elements = Object.fromEntries(
   [...document.querySelectorAll("[id]")].map((element) => [element.id, element])
 );
 const dateFormatter = new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" });
-const localOrigin = "http://127.0.0.1:8765";
-const localWorker = "http://127.0.0.1:8787";
-const canUseClient = location.origin === localOrigin && isSecureContext && !!crypto.subtle;
+const canUseClient = isSecureContext && !!crypto.subtle;
 let mode = "access";
 let connection = null;
 let encryptedVault = null;
@@ -22,29 +20,16 @@ let needsSignIn = false;
 class UserError extends Error {}
 class ExpiredSession extends UserError {}
 
-function workerOrigin(value) {
-  try {
-    const url = new URL(value);
-    if ((url.protocol === "https:" || url.origin === localWorker) &&
-        url.pathname === "/" && !url.username && !url.password && !url.search && !url.hash) {
-      return url.origin;
-    }
-  } catch {
-    // Use the same message for malformed and unsupported URLs.
-  }
-  throw new UserError("请输入同步 Worker 的 HTTPS 根网址。");
-}
-
-async function request(origin, path, signal, options) {
+async function request(path, signal, options) {
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(15_000)]);
   let response;
   try {
-    response = await fetch(origin + path, {
+    response = await fetch(path, {
       cache: "no-store",
       credentials: "omit",
-      mode: "cors",
+      mode: "same-origin",
       redirect: "error",
-      referrerPolicy: "no-referrer",
+      referrerPolicy: "same-origin",
       signal: deadline,
       ...options,
     });
@@ -79,8 +64,8 @@ async function responseJson(response, maxBytes) {
   }
 }
 
-async function authenticate(origin, password, signal) {
-  const pending = request(origin, "/api/session", signal, {
+async function authenticate(password, signal) {
+  const pending = request("/api/session", signal, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password }),
@@ -100,7 +85,7 @@ async function authenticate(origin, password, signal) {
 }
 
 async function vaultRequest(access, signal, options) {
-  const response = await request(access.origin, "/api/vault", signal, {
+  const response = await request("/api/vault", signal, {
     ...options,
     headers: { ...options?.headers, Authorization: `Bearer ${access.token}` },
   });
@@ -177,7 +162,7 @@ function renderControls() {
   elements["gate-copy"].textContent = setup
     ? "请用独立的随机长口令。忘记主密码将无法解密。"
     : mode === "unlock" ? "主密码只在此设备的内存中使用。"
-      : "先连接你的同步 Worker，再用独立的主密码解锁。";
+      : "输入门禁密码后，再用独立的加密主密码解锁笔记。";
 
   elements["new-note"].disabled = busy;
   elements["first-note"].disabled = busy;
@@ -185,7 +170,7 @@ function renderControls() {
   elements.save.disabled = busy || needsSignIn || !dirty || conflict;
   elements["delete-note"].hidden = !selected;
   elements["delete-note"].disabled = busy;
-  for (const id of ["worker-url", "access-password", "renew-password", "password", "confirm-password", "note-title", "note-tags", "note-body"]) {
+  for (const id of ["access-password", "renew-password", "password", "confirm-password", "note-title", "note-tags", "note-body"]) {
     elements[id].readOnly = busy;
   }
 }
@@ -235,16 +220,14 @@ function takeInput(id) {
 async function connect() {
   await run(async (signal) => {
     let password = takeInput("access-password");
-    const origin = workerOrigin(elements["worker-url"].value.trim());
-    const signingIn = authenticate(origin, password, signal);
+    const signingIn = authenticate(password, signal);
     password = "";
-    const access = { origin, token: await signingIn };
+    const access = { token: await signingIn };
     const remote = await readVault(access, signal);
     signal.throwIfAborted();
     connection = access;
     encryptedVault = remote;
     mode = remote ? "unlock" : "setup";
-    elements["worker-url"].value = "";
   });
   if (connection && !session) elements.password.focus();
 }
@@ -252,7 +235,7 @@ async function connect() {
 async function renew() {
   await run(async (signal) => {
     let password = takeInput("renew-password");
-    const signingIn = authenticate(connection.origin, password, signal);
+    const signingIn = authenticate(password, signal);
     password = "";
     const token = await signingIn;
     signal.throwIfAborted();
@@ -460,7 +443,7 @@ function lock() {
   dirty = false;
   conflict = false;
   needsSignIn = false;
-  for (const id of ["worker-url", "access-password", "password", "confirm-password", "renew-password",
+  for (const id of ["access-password", "password", "confirm-password", "renew-password",
     "search", "note-title", "note-tags", "note-body"]) takeInput(id);
   setNotice(elements["gate-notice"]);
   setNotice(elements["editor-notice"]);
@@ -513,7 +496,7 @@ document.addEventListener("keydown", (event) => {
   if (event.isComposing) return;
   if (event.key === "Enter") {
     const id = event.target.id;
-    if (id === "worker-url" || id === "access-password") void connect();
+    if (id === "access-password") void connect();
     if (id === "password" || id === "confirm-password") void unlock();
     if (id === "renew-password") void renew();
   }
@@ -526,4 +509,4 @@ window.addEventListener("blur", lock);
 window.addEventListener("pagehide", lock);
 document.addEventListener("visibilitychange", () => { if (document.hidden) lock(); });
 renderControls();
-if (!canUseClient) setNotice(elements["gate-notice"], "请从本地启动器打开密记。");
+if (!canUseClient) setNotice(elements["gate-notice"], "请使用 HTTPS 访问密记。");
